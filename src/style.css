@@ -55,7 +55,7 @@ button {
   font-size: 1em;
   font-weight: 500;
   font-family: inherit;
-  background-color: #1a1a1a;
+  background-color: #ffffff;
   cursor: pointer;
   transition: border-color 0.25s;
 }
@@ -82,4 +82,40 @@ button:focus-visible {
   button {
     background-color: #f9f9f9;
   }
+}
+
+#statusContainer {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px;
+  background: #f8f9fa;
+  border-top: 1px solid #ccc;
+}
+
+#inventoryPanel {
+  flex: 1;
+  padding: 10px;
+  margin-left: 10px;
+  background: #ffffff;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  max-height: 20vh;
+  overflow-y: auto; /* Allows scrolling if the inventory gets too long */
+}
+
+#inventoryPanel h3 {
+  margin: 0 0 10px;
+  font-size: 1.2em;
+}
+
+#inventoryPanel ul {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+}
+
+#inventoryPanel li {
+  padding: 5px 0;
+  font-size: 1em;
+  border-bottom: 1px solid #eee;
 }
