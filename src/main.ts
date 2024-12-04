@@ -15,14 +15,62 @@ const TILE_DEGREES = 1e-4; // Tile size on the map
 const NEIGHBORHOOD_RADIUS = 8; // How many tiles around the player are visible
 const CACHE_SPAWN_PROBABILITY = 0.1;
 const MAX_COINS_PER_CACHE = 5;
-
-// Inventory panel reference
 const inventoryPanel = document.querySelector<HTMLDivElement>(
   "#inventoryPanel",
 )!;
 
-// Create a `Board` instance
-const board = new Board(TILE_DEGREES, NEIGHBORHOOD_RADIUS);
+// Interfaces
+interface Coin {
+  i: number;
+  j: number;
+  serial: string; // Unique serial ID for the coin
+}
+
+interface Cache {
+  coins: Set<string>;
+}
+
+interface Inventory {
+  items: Set<string>;
+}
+
+// Utility Functions
+function formatCoin(coin: Coin): string {
+  const serialTruncated = coin.serial.slice(0, 6); // Shorten the serial to 6 characters
+  return `${coin.i}:${coin.j}#${serialTruncated}`;
+}
+
+function createInventory(): Inventory {
+  return { items: new Set() };
+}
+
+function addItem(inventory: Inventory, itemId: string): void {
+  inventory.items.add(itemId);
+}
+
+function removeItem(inventory: Inventory, itemId: string): boolean {
+  return inventory.items.delete(itemId); // Removes the item and returns `true` if it existed
+}
+
+function renderInventory(inventory: Inventory, container: HTMLElement): void {
+  container.innerHTML = `<h3>Inventory</h3><ul>`;
+  for (const item of inventory.items) {
+    container.innerHTML += `<li>${item}</li>`; // Uses the shortened format
+  }
+  container.innerHTML += `</ul>`;
+}
+
+function renderCacheCoins(cache: Cache, popupDiv: HTMLElement): void {
+  const cacheCoinsDiv = popupDiv.querySelector(".cache-coins")!;
+  cacheCoinsDiv.innerHTML = `<h4>Cache Coins:</h4>`;
+  if (cache.coins.size === 0) {
+    cacheCoinsDiv.innerHTML += `<p>No coins here</p>`;
+  } else {
+    cacheCoinsDiv.innerHTML += `<ul>${
+      Array.from(cache.coins).map((coin) => `<li>${coin}</li>`).join("")
+    }</ul>`;
+  }
+}
 
 // Create the map
 const map = leaflet.map(document.getElementById("map")!, {
@@ -46,51 +94,11 @@ const playerMarker = leaflet.marker(OAKES_CLASSROOM);
 playerMarker.bindTooltip("You are Here.");
 playerMarker.addTo(map);
 
-// Interfaces
-interface Cache {
-  coins: Set<string>;
-}
+const board = new Board(TILE_DEGREES, NEIGHBORHOOD_RADIUS);
 
-interface Inventory {
-  items: Set<string>;
-}
-
-// Utility functions for inventory management
-function createInventory(): Inventory {
-  return { items: new Set() };
-}
-
-function addItem(inventory: Inventory, itemId: string): void {
-  inventory.items.add(itemId);
-}
-
-function removeItem(inventory: Inventory, itemId: string): boolean {
-  return inventory.items.delete(itemId); // Returns true if successful
-}
-
-function renderInventory(inventory: Inventory, container: HTMLElement): void {
-  container.innerHTML = `<h3>Inventory</h3><ul>`;
-  for (const item of inventory.items) {
-    container.innerHTML += `<li>${item}</li>`;
-  }
-  container.innerHTML += `</ul>`;
-}
-
-function renderCacheCoins(cache: Cache, popupDiv: HTMLElement): void {
-  const cacheCoinsDiv = popupDiv.querySelector(".cache-coins")!;
-  cacheCoinsDiv.innerHTML = `<h4>Cache Coins:</h4>`;
-  if (cache.coins.size === 0) {
-    cacheCoinsDiv.innerHTML += `<p>No coins here</p>`;
-  } else {
-    cacheCoinsDiv.innerHTML += `<ul>${
-      Array.from(cache.coins).map((coin) => `<li>${coin}</li>`).join("")
-    }</ul>`;
-  }
-}
-
-// Spawn a cache at the given Cell
+// Function to spawn a cache in a given cell
 function spawnCache(cacheCell: Cell, inventory: Inventory): void {
-  const cache: Cache = { coins: new Set() };
+  const cache: Cache = { coins: new Set() }; // Create an empty cache
 
   // Get bounds for the cache's cell
   const bounds = board.getCellBounds(cacheCell);
@@ -103,13 +111,15 @@ function spawnCache(cacheCell: Cell, inventory: Inventory): void {
 
   // Generate unique coin IDs and add them to the cache
   for (let k = 0; k < numberOfCoins; k++) {
-    const coinId = `coin_${cacheCell.i}_${cacheCell.j}_${k}_${
-      luck(`${cacheCell.i},${cacheCell.j},coin${k}`).toString()
-    }`;
-    cache.coins.add(coinId);
+    const coin: Coin = {
+      i: cacheCell.i,
+      j: cacheCell.j,
+      serial: luck(`${cacheCell.i},${cacheCell.j},coin${k}`).toString(),
+    };
+    cache.coins.add(formatCoin(coin)); // Use the shortened format for coins
   }
 
-  // Bind a popup to the cache with interactive buttons
+  // Bind a popup to the cache to show its coin details and allow interaction
   rect.bindPopup(() => {
     const popupDiv = document.createElement("div");
 
@@ -119,19 +129,20 @@ function spawnCache(cacheCell: Cell, inventory: Inventory): void {
           <button id="depositCoin">Deposit Coin</button>
           <button id="withdrawCoin">Withdraw Coin</button>
       `;
-    renderCacheCoins(cache, popupDiv);
+
+    renderCacheCoins(cache, popupDiv); // Display the current list of coins in the cache
 
     // Deposit coin logic
     popupDiv.querySelector<HTMLButtonElement>("#depositCoin")!.addEventListener(
       "click",
       () => {
-        const inventoryArray = Array.from(inventory.items);
+        const inventoryArray = Array.from(inventory.items); // Get coins from inventory
         if (inventoryArray.length > 0) {
           const coinToDeposit = inventoryArray[0];
           removeItem(inventory, coinToDeposit);
           cache.coins.add(coinToDeposit);
-          renderInventory(inventory, inventoryPanel);
-          renderCacheCoins(cache, popupDiv);
+          renderInventory(inventory, inventoryPanel); // Update inventory display
+          renderCacheCoins(cache, popupDiv); // Update cache display
         } else {
           alert("No coins in your inventory to deposit!");
         }
@@ -142,29 +153,29 @@ function spawnCache(cacheCell: Cell, inventory: Inventory): void {
     popupDiv.querySelector<HTMLButtonElement>("#withdrawCoin")!
       .addEventListener("click", () => {
         if (cache.coins.size > 0) {
-          const coinToWithdraw = Array.from(cache.coins)[0];
+          const coinToWithdraw = Array.from(cache.coins)[0]; // Pick the first coin in the cache
           cache.coins.delete(coinToWithdraw);
           addItem(inventory, coinToWithdraw);
-          renderInventory(inventory, inventoryPanel);
-          renderCacheCoins(cache, popupDiv);
+          renderInventory(inventory, inventoryPanel); // Update inventory display
+          renderCacheCoins(cache, popupDiv); // Update cache display
         } else {
           alert("No coins in the cache to withdraw!");
         }
       });
 
-    return popupDiv;
+    return popupDiv; // Return the popup's DOM element
   });
 }
 
 // Initialize the game
 function initializeGame(): void {
-  const inventory = createInventory(); // Create the player's inventory
-  renderInventory(inventory, inventoryPanel); // Render inventory
+  const inventory = createInventory();
+  renderInventory(inventory, inventoryPanel);
 
-  // Get all visible cells near the player's starting position
+  // Determine all visible cells near the starting position
   const visibleCells = board.getCellsNearPoint(OAKES_CLASSROOM);
 
-  // Spawn caches for some of the cells
+  // Spawn caches in some of the visible cells
   for (const cell of visibleCells) {
     if (luck(`${cell.i},${cell.j}`) < CACHE_SPAWN_PROBABILITY) {
       spawnCache(cell, inventory);
