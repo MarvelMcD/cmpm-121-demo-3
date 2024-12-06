@@ -14,11 +14,32 @@ const NEIGHBORHOOD_RADIUS = 8;
 const CACHE_SPAWN_PROBABILITY = 0.1;
 const MAX_COINS = 5;
 const MIN_COINS = 1;
+const MAX_INVENTORY_SIZE = 10;
 
 // Global state
 let playerLocation = OAKES_CLASSROOM;
 const inventory: string[] = [];
 const cacheData: Record<string, Geocache> = {};
+
+// Map setup
+const map = leaflet.map("map", {
+  center: playerLocation,
+  zoom: GAMEPLAY_ZOOM_LEVEL,
+  minZoom: GAMEPLAY_ZOOM_LEVEL,
+  maxZoom: GAMEPLAY_ZOOM_LEVEL,
+  zoomControl: false,
+  scrollWheelZoom: false,
+});
+leaflet
+  .tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution:
+      '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  })
+  .addTo(map);
+
+// Board and updates
+const board = new Board(TILE_WIDTH, NEIGHBORHOOD_RADIUS);
 
 // UI elements
 const inventoryPanel = document.querySelector<HTMLDivElement>(
@@ -44,29 +65,46 @@ function createGeocache(i: number, j: number, coins: Coin[] = []): Geocache {
   return { i, j, coins };
 }
 
-// Utility functions
-function formatCoin(coin: Coin): string {
-  return `${coin.i}:${coin.j}#${coin.number}`;
+// Inventory management
+function addCoinToInventory(coin: string): boolean {
+  if (inventory.length >= MAX_INVENTORY_SIZE) {
+    console.warn("Inventory full!");
+    showTemporaryPopup("Inventory full!");
+    return false;
+  }
+  inventory.push(coin);
+  return true;
 }
 
-function renderInventory() {
+function updateInventoryUI() {
   inventoryPanel.innerHTML = `<h3>Inventory</h3><ul>`;
   inventory.forEach((coin) => {
     inventoryPanel.innerHTML += `<li>${coin}</li>`;
   });
   inventoryPanel.innerHTML += `</ul>`;
+  updateStatus();
+}
+
+// UI feedback utilities
+function showTemporaryPopup(message: string) {
+  const notification = document.createElement("div");
+  notification.innerText = message;
+  notification.className = "notification";
+  document.body.appendChild(notification);
+  setTimeout(() => notification.remove(), 2000);
 }
 
 function updateStatus() {
   statusPanel.innerText = `Coins: ${inventory.length}`;
 }
 
-function spawnCache(cell: Cell) {
-  const bounds = board.getCellBounds(cell);
+// Geocache data management
+function ensureCacheExists(cell: Cell): Geocache {
   const key = `${cell.i},${cell.j}`;
-
   if (!(key in cacheData)) {
-    if (luck(key) >= CACHE_SPAWN_PROBABILITY) return;
+    if (luck(key) >= CACHE_SPAWN_PROBABILITY) {
+      throw new Error("No cache exists here.");
+    }
     const numCoins = Math.floor(
       luck(key + "_coins") * (MAX_COINS - MIN_COINS + 1),
     ) + MIN_COINS;
@@ -80,97 +118,97 @@ function spawnCache(cell: Cell) {
       })),
     );
   }
+  return cacheData[key];
+}
 
-  const cache = cacheData[key];
+// Rendering geocaches on the map
+function renderCacheOnMap(cell: Cell) {
+  const bounds = board.getCellBounds(cell);
+  const cache = ensureCacheExists(cell);
+
   leaflet
     .rectangle(bounds)
     .addTo(map)
-    .bindPopup(() => {
-      const popupDiv = document.createElement("div");
-      const coinList = cache.coins;
-      popupDiv.innerHTML = `
-        <div>Cache at "${cell.i},${cell.j}"</div>
-        <button id="collectCoin">Collect Coin</button>
-        <button id="depositCoin">Deposit Coin</button>
-        <div>Coins: ${coinList.map(formatCoin).join(", ")}</div>`;
+    .bindPopup(() => createPopupContent(cache, cell));
+}
 
-      popupDiv.querySelector<HTMLButtonElement>("#collectCoin")!
-        .addEventListener("click", () => {
-          if (coinList.length > 0) {
-            const coin = coinList.pop()!;
-            inventory.push(formatCoin(coin));
-            renderInventory();
-            updateStatus();
+// Popup rendering
+function createPopupContent(cache: Geocache, cell: Cell): HTMLDivElement {
+  const popupDiv = document.createElement("div");
+  renderPopupContent(popupDiv, cache, cell);
+  return popupDiv;
+}
 
-            popupDiv.innerHTML = `
-            <div>Cache at "${cell.i},${cell.j}"</div>
-            <button id="collectCoin">Collect Coin</button>
-            <button id="depositCoin">Deposit Coin</button>
-            <div>Coins: ${coinList.map(formatCoin).join(", ")}</div>`;
-          }
-        });
+function renderPopupContent(
+  popupDiv: HTMLDivElement,
+  cache: Geocache,
+  cell: Cell,
+) {
+  popupDiv.innerHTML = `
+    <div>Cache at "${cell.i},${cell.j}"</div>
+    <button id="collectCoin">Collect Coin</button>
+    <button id="depositCoin">Deposit Coin</button>
+    <div>Coins: ${cache.coins.map(formatCoin).join(", ")}</div>
+  `;
+  setupPopupEventListeners(popupDiv, cache, cell);
+}
 
-      popupDiv.querySelector<HTMLButtonElement>("#depositCoin")!
-        .addEventListener("click", () => {
-          if (inventory.length > 0) {
-            const coinStr = inventory.pop()!;
-            const [i, j, number] = coinStr.split(/[:#]/).map(Number);
-            cache.coins.push({ i, j, number });
-            renderInventory();
-            updateStatus();
+// Event listeners for popup buttons
+function setupPopupEventListeners(
+  popupDiv: HTMLDivElement,
+  cache: Geocache,
+  cell: Cell,
+) {
+  popupDiv.querySelector<HTMLButtonElement>("#collectCoin")!
+    .addEventListener("click", () => {
+      if (cache.coins.length > 0) {
+        const coin = cache.coins.pop()!;
+        if (!addCoinToInventory(formatCoin(coin))) {
+          cache.coins.push(coin);
+        }
+        updateInventoryUI();
+        renderPopupContent(popupDiv, cache, cell);
+      }
+    });
 
-            popupDiv.innerHTML = `
-            <div>Cache at "${cell.i},${cell.j}"</div>
-            <button id="collectCoin">Collect Coin</button>
-            <button id="depositCoin">Deposit Coin</button>
-            <div>Coins: ${coinList.map(formatCoin).join(", ")}</div>`;
-          }
-        });
-      return popupDiv;
+  popupDiv.querySelector<HTMLButtonElement>("#depositCoin")!
+    .addEventListener("click", () => {
+      if (inventory.length > 0) {
+        const coinStr = inventory.pop()!;
+        const [i, j, number] = coinStr.split(/[:#]/).map(Number);
+        cache.coins.push({ i, j, number });
+        updateInventoryUI();
+        renderPopupContent(popupDiv, cache, cell);
+      }
     });
 }
 
-// Map setup
-const map = leaflet.map("map", {
-  center: playerLocation,
-  zoom: GAMEPLAY_ZOOM_LEVEL,
-  minZoom: GAMEPLAY_ZOOM_LEVEL,
-  maxZoom: GAMEPLAY_ZOOM_LEVEL,
-  zoomControl: false,
-  scrollWheelZoom: false,
-});
-leaflet
-  .tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution:
-      '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-  })
-  .addTo(map);
-
-// Board and updates
-const board = new Board(TILE_WIDTH, NEIGHBORHOOD_RADIUS);
-
+// Updating caches on the map
 function updateCaches() {
   const visibleCells = board.getCellsNearPoint(playerLocation);
 
-  // Remove existing non-tile layers
   map.eachLayer((layer: L.Layer) => {
     if (layer instanceof leaflet.Rectangle || layer instanceof leaflet.Marker) {
       map.removeLayer(layer);
     }
   });
 
-  // Re-add player marker
-  const playerMarker = leaflet.marker(playerLocation, {
-    title: "You are here",
-  });
-  playerMarker.addTo(map);
+  leaflet.marker(playerLocation, { title: "You are here" }).addTo(map);
 
-  // Add caches
-  visibleCells.forEach((cell) => spawnCache(cell));
+  visibleCells.forEach((cell) => {
+    try {
+      renderCacheOnMap(cell);
+    } catch (error) {
+      if (error instanceof Error) {
+        console.warn(error.message);
+      } else {
+        console.warn("An unknown error occurred.");
+      }
+    }
+  });
 }
 
-// Movement
+// Player movement logic
 function movePlayer(dx: number, dy: number) {
   playerLocation = leaflet.latLng(
     playerLocation.lat + dy * TILE_WIDTH,
@@ -180,7 +218,7 @@ function movePlayer(dx: number, dy: number) {
   updateCaches();
 }
 
-// Movement buttons
+// Movement button handlers
 document.querySelector("#north")!.addEventListener(
   "click",
   () => movePlayer(0, 1),
@@ -198,7 +236,12 @@ document.querySelector("#west")!.addEventListener(
   () => movePlayer(-1, 0),
 );
 
-// Initialize
+// Utility functions
+function formatCoin(coin: Coin): string {
+  return `${coin.i}:${coin.j}#${coin.number}`;
+}
+
+// Initialization logic
 updateCaches();
-renderInventory();
+updateInventoryUI();
 updateStatus();
