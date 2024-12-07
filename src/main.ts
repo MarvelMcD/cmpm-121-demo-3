@@ -339,7 +339,7 @@ function resetGameState() {
     });
 
     // Clear player location history
-    playerLocation = OAKES_CLASSROOM; // Reset to initial location
+    playerLocation = OAKES_CLASSROOM; 
 
     // Clear all local storage
     localStorage.removeItem("playerLocation");
@@ -353,7 +353,7 @@ function resetGameState() {
     }
 
     // Center the map back to the initial location
-    map.setView(playerLocation, GAMEPLAY_ZOOM_LEVEL); // Reset camera to center
+    map.setView(playerLocation, GAMEPLAY_ZOOM_LEVEL);
 
     // Update the UI to reflect the reset state
     updateInventoryUI();
@@ -362,17 +362,17 @@ function resetGameState() {
 }
 
 // Initialization logic
-loadGameState(); // Load game state during initialization
+loadGameState();
 updateInventoryUI();
-updateStatus(); // Ensure the status updates after loading
+updateStatus();
 
 // Automatic Position Updating
 document.querySelector("#sensor")!.addEventListener("click", () => {
     if (isAutoUpdating) {
-        stopAutoUpdate(); // If already updating, stop it
+        stopAutoUpdate();
         showTemporaryPopup("Automatic location updates stopped.");
     } else {
-        startAutoUpdate(); // Start automatic location tracking
+        startAutoUpdate();
         showTemporaryPopup("Automatic location updates started.");
     }
 });
