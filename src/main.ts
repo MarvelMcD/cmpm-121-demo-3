@@ -22,8 +22,24 @@ const inventory: string[] = JSON.parse(localStorage.getItem("inventory") || "[]"
 const cacheData: Record<string, string> = JSON.parse(localStorage.getItem("cacheData") || "{}");
 const movementHistory: leaflet.LatLng[] = []; // To track movement history
 let movementPolyline: leaflet.Polyline; // Polyline to represent the player's path
+let isAutoUpdating = false; // Track whether automatic updating is active
+let geoWatchId: number | null = null; // Store the watch ID
 
-// MovementCoordinate interface for saved coordinates
+// Interfaces
+interface Coin {
+    i: number;
+    j: number;
+    number: number; // Unique identifier within a cache
+}
+
+interface Geocache {
+    i: number;
+    j: number;
+    coins: Coin[];
+    toMemento(): string; // Serialize the state
+    fromMemento(memento: string): void; // Restore the state
+}
+
 interface MovementCoordinate {
     lat: number;
     lng: number;
@@ -39,6 +55,7 @@ const map = leaflet.map("map", {
     scrollWheelZoom: false,
 });
 
+// Tile layer setup
 leaflet
     .tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
@@ -46,28 +63,14 @@ leaflet
     })
     .addTo(map);
 
-// Board and updates
+// Board setup
 const board = new Board(TILE_WIDTH, NEIGHBORHOOD_RADIUS);
 
 // UI elements
 const inventoryPanel = document.querySelector<HTMLDivElement>("#inventoryPanel")!;
 const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
 
-// Interfaces
-interface Coin {
-    i: number;
-    j: number;
-    number: number; // Unique identifier within a cache
-}
-interface Geocache {
-    i: number;
-    j: number;
-    coins: Coin[];
-    toMemento(): string; // Serialize the state
-    fromMemento(memento: string): void; // Restore the state
-}
-
-// Factory function for Geocache
+// Geocache Management
 function createGeocache(i: number, j: number, coins: Coin[] = []): Geocache {
     return {
         i,
@@ -85,7 +88,45 @@ function createGeocache(i: number, j: number, coins: Coin[] = []): Geocache {
     };
 }
 
-// Function to save the game state to local storage
+// Cache data management
+function ensureCacheExists(cell: Cell): Geocache {
+    const key = `${cell.i},${cell.j}`;
+    if (key in cacheData) {
+        const memento = cacheData[key];
+        const cache = createGeocache(0, 0);
+        cache.fromMemento(memento); // Restore state
+        return cache;
+    } else {
+        if (luck(key) >= CACHE_SPAWN_PROBABILITY) {
+            throw new Error("No cache exists here.");
+        }
+        const numCoins = Math.floor(
+            luck(key + "_coins") * (MAX_COINS - MIN_COINS + 1),
+        ) + MIN_COINS;
+
+        const cache = createGeocache(
+            cell.i,
+            cell.j,
+            Array.from({ length: numCoins }, (_, idx) => ({
+                i: cell.i,
+                j: cell.j,
+                number: idx,
+            })),
+        );
+
+        cacheData[key] = cache.toMemento();
+        saveGameState(); // Save state after mutation
+        return cache;
+    }
+}
+
+function updateCacheMemento(cache: Geocache) {
+    const key = `${cache.i},${cache.j}`;
+    cacheData[key] = cache.toMemento();
+    saveGameState(); // Save state after mutation
+}
+
+// Game State Management
 function saveGameState() {
     localStorage.setItem("playerLocation", JSON.stringify(playerLocation));
     localStorage.setItem("inventory", JSON.stringify(inventory));
@@ -93,7 +134,6 @@ function saveGameState() {
     localStorage.setItem("movementHistory", JSON.stringify(movementHistory.map(point => ({ lat: point.lat, lng: point.lng })))); // Save movement history
 }
 
-// Function to load the game state from local storage
 function loadGameState() {
     const savedLocation = localStorage.getItem("playerLocation");
     if (savedLocation) {
@@ -127,7 +167,7 @@ function loadGameState() {
     updateMovementPolyline();
 }
 
-// Inventory management
+// Inventory Management
 function addCoinToInventory(coin: string): boolean {
     if (inventory.length >= MAX_INVENTORY_SIZE) {
         console.warn("Inventory full!");
@@ -148,7 +188,7 @@ function updateInventoryUI() {
     updateStatus();
 }
 
-// UI feedback utilities
+// UI Feedback Utilities
 function showTemporaryPopup(message: string) {
     const notification = document.createElement("div");
     notification.innerText = message;
@@ -161,43 +201,7 @@ function updateStatus() {
     statusPanel.innerText = `Coins: ${inventory.length}`;
 }
 
-// Geocache data management
-function ensureCacheExists(cell: Cell): Geocache {
-    const key = `${cell.i},${cell.j}`;
-    if (key in cacheData) {
-        const memento = cacheData[key];
-        const cache = createGeocache(0, 0);
-        cache.fromMemento(memento); // Restore state
-        return cache;
-    } else {
-        if (luck(key) >= CACHE_SPAWN_PROBABILITY) {
-            throw new Error("No cache exists here.");
-        }
-        const numCoins = Math.floor(
-            luck(key + "_coins") * (MAX_COINS - MIN_COINS + 1),
-        ) + MIN_COINS;
-        const cache = createGeocache(
-            cell.i,
-            cell.j,
-            Array.from({ length: numCoins }, (_, idx) => ({
-                i: cell.i,
-                j: cell.j,
-                number: idx,
-            })),
-        );
-        cacheData[key] = cache.toMemento();
-        saveGameState(); // Save state after mutation
-        return cache;
-    }
-}
-
-function updateCacheMemento(cache: Geocache) {
-    const key = `${cache.i},${cache.j}`;
-    cacheData[key] = cache.toMemento();
-    saveGameState(); // Save state after mutation
-}
-
-// Rendering geocaches on the map
+// Map Caches Management
 function renderCacheOnMap(cell: Cell) {
     const bounds = board.getCellBounds(cell);
     const cache = ensureCacheExists(cell);
@@ -207,7 +211,7 @@ function renderCacheOnMap(cell: Cell) {
         .bindPopup(() => createPopupContent(cache, cell));
 }
 
-// Popup rendering
+// Popup Rendering
 function createPopupContent(cache: Geocache, cell: Cell): HTMLDivElement {
     const popupDiv = document.createElement("div");
     renderPopupContent(popupDiv, cache, cell);
@@ -224,7 +228,7 @@ function renderPopupContent(popupDiv: HTMLDivElement, cache: Geocache, cell: Cel
     setupPopupEventListeners(popupDiv, cache, cell);
 }
 
-// Event listeners for popup buttons
+// Event Listeners for Popup Buttons
 function setupPopupEventListeners(popupDiv: HTMLDivElement, cache: Geocache, cell: Cell) {
     popupDiv.querySelector<HTMLButtonElement>("#collectCoin")!.addEventListener("click", () => {
         if (cache.coins.length > 0) {
@@ -250,7 +254,7 @@ function setupPopupEventListeners(popupDiv: HTMLDivElement, cache: Geocache, cel
     });
 }
 
-// Updating caches on the map
+// Updating Caches on the Map
 function updateCaches() {
     const visibleCells = board.getCellsNearPoint(playerLocation);
     map.eachLayer((layer: L.Layer) => {
@@ -272,7 +276,7 @@ function updateCaches() {
     });
 }
 
-// Player movement logic
+// Player Movement Logic
 function movePlayer(dx: number, dy: number) {
     playerLocation = leaflet.latLng(
         playerLocation.lat + dy * TILE_WIDTH,
@@ -305,24 +309,25 @@ function updateMovementPolyline() {
     }).addTo(map); // Add the polyline to the map
 }
 
-// Movement button handlers
+// Movement Button Handlers
 document.querySelector("#north")!.addEventListener("click", () => movePlayer(0, 1));
 document.querySelector("#south")!.addEventListener("click", () => movePlayer(0, -1));
 document.querySelector("#east")!.addEventListener("click", () => movePlayer(1, 0));
 document.querySelector("#west")!.addEventListener("click", () => movePlayer(-1, 0));
 
-// Utility functions
+// Utility Functions
 function formatCoin(coin: Coin): string {
     return `${coin.i}:${coin.j}#${coin.number}`;
 }
 
-// Reset game state function
+// Reset Game State Function
 document.querySelector("#reset")!.addEventListener("click", resetGameState);
 function resetGameState() {
     const confirmReset = confirm("Are you sure you want to erase your game state?"); // Ask for confirmation
     if (!confirmReset) {
         return; // If the user cancels, exit the function
     }
+    stopAutoUpdate(); // Ensure automatic tracking is disabled when resetting
 
     // Clear inventory
     inventory.length = 0;
@@ -360,3 +365,41 @@ function resetGameState() {
 loadGameState(); // Load game state during initialization
 updateInventoryUI();
 updateStatus(); // Ensure the status updates after loading
+
+// Automatic Position Updating
+document.querySelector("#sensor")!.addEventListener("click", () => {
+    if (isAutoUpdating) {
+        stopAutoUpdate(); // If already updating, stop it
+        showTemporaryPopup("Automatic location updates stopped.");
+    } else {
+        startAutoUpdate(); // Start automatic location tracking
+        showTemporaryPopup("Automatic location updates started.");
+    }
+});
+
+function startAutoUpdate() {
+    if (!isAutoUpdating) {
+        geoWatchId = navigator.geolocation.watchPosition(
+            (position) => {
+                playerLocation = leaflet.latLng(position.coords.latitude, position.coords.longitude);
+                movementHistory.push(playerLocation); // Save current position in history
+                updateMovementPolyline(); // Update the polyline
+                map.setView(playerLocation, GAMEPLAY_ZOOM_LEVEL); // Center map on updated location
+                updateCaches(); // Update the map caches
+                saveGameState(); // Save game state
+            },
+            (error) => {
+                console.error("Geolocation error: ", error);
+            },
+            { enableHighAccuracy: true } // High accuracy for better location tracking
+        );
+        isAutoUpdating = true; // Set the flag to true
+    }
+}
+
+function stopAutoUpdate() {
+    if (isAutoUpdating && geoWatchId !== null) {
+        navigator.geolocation.clearWatch(geoWatchId); // Stop tracking geolocation
+        isAutoUpdating = false; // Set the flag to false
+    }
+}
