@@ -18,8 +18,12 @@ const MAX_INVENTORY_SIZE = 10;
 
 // Global state
 let playerLocation = OAKES_CLASSROOM;
-const inventory: string[] = [];
-const cacheData: Record<string, string> = {}; // Stores serialized cache mementos
+const inventory: string[] = JSON.parse(
+  localStorage.getItem("inventory") || "[]",
+);
+const cacheData: Record<string, string> = JSON.parse(
+  localStorage.getItem("cacheData") || "{}",
+);
 
 // Map setup
 const map = leaflet.map("map", {
@@ -30,6 +34,7 @@ const map = leaflet.map("map", {
   zoomControl: false,
   scrollWheelZoom: false,
 });
+
 leaflet
   .tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
@@ -40,7 +45,6 @@ leaflet
 
 // Board and updates
 const board = new Board(TILE_WIDTH, NEIGHBORHOOD_RADIUS);
-
 // UI elements
 const inventoryPanel = document.querySelector<HTMLDivElement>(
   "#inventoryPanel",
@@ -53,7 +57,6 @@ interface Coin {
   j: number;
   number: number; // Unique identifier within a cache
 }
-
 interface Geocache {
   i: number;
   j: number;
@@ -68,11 +71,9 @@ function createGeocache(i: number, j: number, coins: Coin[] = []): Geocache {
     i,
     j,
     coins,
-
     toMemento(): string {
       return JSON.stringify({ i: this.i, j: this.j, coins: this.coins });
     },
-
     fromMemento(memento: string): void {
       const state = JSON.parse(memento);
       this.i = state.i;
@@ -80,6 +81,40 @@ function createGeocache(i: number, j: number, coins: Coin[] = []): Geocache {
       this.coins = state.coins;
     },
   };
+}
+
+// Function to save the game state to local storage
+function saveGameState() {
+  localStorage.setItem("playerLocation", JSON.stringify(playerLocation));
+  localStorage.setItem("inventory", JSON.stringify(inventory));
+  localStorage.setItem("cacheData", JSON.stringify(cacheData));
+}
+
+// Function to load the game state from local storage
+function loadGameState() {
+  const savedLocation = localStorage.getItem("playerLocation");
+  if (savedLocation) {
+    playerLocation = leaflet.latLng(JSON.parse(savedLocation));
+  } else {
+    // If there's no saved location, reset to initial location
+    playerLocation = OAKES_CLASSROOM;
+  }
+
+  const savedInventory = localStorage.getItem("inventory");
+  if (savedInventory) {
+    inventory.push(...JSON.parse(savedInventory));
+  }
+
+  const savedCacheData = localStorage.getItem("cacheData");
+  if (savedCacheData) {
+    Object.assign(cacheData, JSON.parse(savedCacheData));
+  }
+
+  // Center the map around the loaded player location
+  map.setView(playerLocation, GAMEPLAY_ZOOM_LEVEL); // Center map when loading state
+
+  // Call updateCaches after loading game state
+  updateCaches(); // Ensure caches and player are rendered based on loaded data
 }
 
 // Inventory management
@@ -90,6 +125,7 @@ function addCoinToInventory(coin: string): boolean {
     return false;
   }
   inventory.push(coin);
+  saveGameState(); // Save state after mutation
   return true;
 }
 
@@ -118,7 +154,6 @@ function updateStatus() {
 // Geocache data management
 function ensureCacheExists(cell: Cell): Geocache {
   const key = `${cell.i},${cell.j}`;
-
   if (key in cacheData) {
     // Restore cache from its memento
     const memento = cacheData[key];
@@ -130,11 +165,9 @@ function ensureCacheExists(cell: Cell): Geocache {
     if (luck(key) >= CACHE_SPAWN_PROBABILITY) {
       throw new Error("No cache exists here.");
     }
-
     const numCoins = Math.floor(
       luck(key + "_coins") * (MAX_COINS - MIN_COINS + 1),
     ) + MIN_COINS;
-
     const cache = createGeocache(
       cell.i,
       cell.j,
@@ -144,10 +177,9 @@ function ensureCacheExists(cell: Cell): Geocache {
         number: idx,
       })),
     );
-
     // Save the cache state as a memento
     cacheData[key] = cache.toMemento();
-
+    saveGameState(); // Save state after mutation
     return cache;
   }
 }
@@ -155,13 +187,13 @@ function ensureCacheExists(cell: Cell): Geocache {
 function updateCacheMemento(cache: Geocache) {
   const key = `${cache.i},${cache.j}`;
   cacheData[key] = cache.toMemento();
+  saveGameState(); // Save state after mutation
 }
 
 // Rendering geocaches on the map
 function renderCacheOnMap(cell: Cell) {
   const bounds = board.getCellBounds(cell);
   const cache = ensureCacheExists(cell);
-
   leaflet
     .rectangle(bounds)
     .addTo(map)
@@ -181,11 +213,11 @@ function renderPopupContent(
   cell: Cell,
 ) {
   popupDiv.innerHTML = `
-    <div>Cache at "${cell.i},${cell.j}"</div>
-    <button id="collectCoin">Collect Coin</button>
-    <button id="depositCoin">Deposit Coin</button>
-    <div>Coins: ${cache.coins.map(formatCoin).join(", ")}</div>
-  `;
+        <div>Cache at "${cell.i},${cell.j}"</div>
+        <button id="collectCoin">Collect Coin</button>
+        <button id="depositCoin">Deposit Coin</button>
+        <div>Coins: ${cache.coins.map(formatCoin).join(", ")}</div>
+    `;
   setupPopupEventListeners(popupDiv, cache, cell);
 }
 
@@ -207,7 +239,6 @@ function setupPopupEventListeners(
         renderPopupContent(popupDiv, cache, cell);
       }
     });
-
   popupDiv.querySelector<HTMLButtonElement>("#depositCoin")!
     .addEventListener("click", () => {
       if (inventory.length > 0) {
@@ -224,15 +255,12 @@ function setupPopupEventListeners(
 // Updating caches on the map
 function updateCaches() {
   const visibleCells = board.getCellsNearPoint(playerLocation);
-
   map.eachLayer((layer: L.Layer) => {
     if (layer instanceof leaflet.Rectangle || layer instanceof leaflet.Marker) {
       map.removeLayer(layer);
     }
   });
-
   leaflet.marker(playerLocation, { title: "You are here" }).addTo(map);
-
   visibleCells.forEach((cell) => {
     try {
       renderCacheOnMap(cell);
@@ -254,6 +282,7 @@ function movePlayer(dx: number, dy: number) {
   );
   map.panTo(playerLocation);
   updateCaches();
+  saveGameState(); // Save after player moves
 }
 
 // Movement button handlers
@@ -279,7 +308,37 @@ function formatCoin(coin: Coin): string {
   return `${coin.i}:${coin.j}#${coin.number}`;
 }
 
+document.querySelector("#reset")!.addEventListener("click", resetGameState);
+
+// Reset game state function
+function resetGameState() {
+  // Clear inventory
+  inventory.length = 0;
+
+  // Reset cache data
+  const keys = Object.keys(cacheData);
+  keys.forEach((key) => {
+    delete cacheData[key]; // Remove all caches
+  });
+
+  // Clear player location history
+  playerLocation = OAKES_CLASSROOM; // Reset to initial location
+
+  // Clear all local storage
+  localStorage.removeItem("playerLocation");
+  localStorage.removeItem("inventory");
+  localStorage.removeItem("cacheData");
+
+  // Center the map back to the initial location
+  map.setView(playerLocation, GAMEPLAY_ZOOM_LEVEL); // Reset camera to center
+
+  // Update the UI to reflect the reset state
+  updateInventoryUI();
+  updateStatus();
+  updateCaches(); // Refresh caches to make sure they are rendered correctly
+}
+
 // Initialization logic
-updateCaches();
+loadGameState(); // Load game state during initialization
 updateInventoryUI();
-updateStatus();
+updateStatus(); // Ensure the status updates after loading
