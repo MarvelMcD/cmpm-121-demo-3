@@ -5,6 +5,7 @@ import "./style.css";
 import "./leafletWorkaround.ts";
 import luck from "./luck.ts";
 import { Board, Cell } from "./board.ts";
+import { Coin, Geocache, createGeocache} from './geocache.ts';
 
 // Constants and parameters
 const OAKES_CLASSROOM = leaflet.latLng(36.98949379578401, -122.06277128548504);
@@ -24,21 +25,6 @@ const movementHistory: leaflet.LatLng[] = []; // To track movement history
 let movementPolyline: leaflet.Polyline; // Polyline to represent the player's path
 let isAutoUpdating = false; // Track whether automatic updating is active
 let geoWatchId: number | null = null; // Store the watch ID
-
-// Interfaces
-interface Coin {
-    i: number;
-    j: number;
-    number: number; // Unique identifier within a cache
-}
-
-interface Geocache {
-    i: number;
-    j: number;
-    coins: Coin[];
-    toMemento(): string; // Serialize the state
-    fromMemento(memento: string): void; // Restore the state
-}
 
 interface MovementCoordinate {
     lat: number;
@@ -69,24 +55,6 @@ const board = new Board(TILE_WIDTH, NEIGHBORHOOD_RADIUS);
 // UI elements
 const inventoryPanel = document.querySelector<HTMLDivElement>("#inventoryPanel")!;
 const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
-
-// Geocache Management
-function createGeocache(i: number, j: number, coins: Coin[] = []): Geocache {
-    return {
-        i,
-        j,
-        coins,
-        toMemento(): string {
-            return JSON.stringify({ i: this.i, j: this.j, coins: this.coins });
-        },
-        fromMemento(memento: string): void {
-            const state = JSON.parse(memento);
-            this.i = state.i;
-            this.j = state.j;
-            this.coins = state.coins;
-        },
-    };
-}
 
 // Cache data management
 function ensureCacheExists(cell: Cell): Geocache {
