@@ -19,7 +19,7 @@ const MAX_INVENTORY_SIZE = 10;
 // Global state
 let playerLocation = OAKES_CLASSROOM;
 const inventory: string[] = [];
-const cacheData: Record<string, Geocache> = {};
+const cacheData: Record<string, string> = {}; // Stores serialized cache mementos
 
 // Map setup
 const map = leaflet.map("map", {
@@ -58,11 +58,28 @@ interface Geocache {
   i: number;
   j: number;
   coins: Coin[];
+  toMemento(): string; // Serialize the state
+  fromMemento(memento: string): void; // Restore the state
 }
 
 // Factory function for Geocache
 function createGeocache(i: number, j: number, coins: Coin[] = []): Geocache {
-  return { i, j, coins };
+  return {
+    i,
+    j,
+    coins,
+
+    toMemento(): string {
+      return JSON.stringify({ i: this.i, j: this.j, coins: this.coins });
+    },
+
+    fromMemento(memento: string): void {
+      const state = JSON.parse(memento);
+      this.i = state.i;
+      this.j = state.j;
+      this.coins = state.coins;
+    },
+  };
 }
 
 // Inventory management
@@ -101,14 +118,24 @@ function updateStatus() {
 // Geocache data management
 function ensureCacheExists(cell: Cell): Geocache {
   const key = `${cell.i},${cell.j}`;
-  if (!(key in cacheData)) {
+
+  if (key in cacheData) {
+    // Restore cache from its memento
+    const memento = cacheData[key];
+    const cache = createGeocache(0, 0); // Create a temporary cache object
+    cache.fromMemento(memento); // Restore state
+    return cache;
+  } else {
+    // Create a new cache and save its state
     if (luck(key) >= CACHE_SPAWN_PROBABILITY) {
       throw new Error("No cache exists here.");
     }
+
     const numCoins = Math.floor(
       luck(key + "_coins") * (MAX_COINS - MIN_COINS + 1),
     ) + MIN_COINS;
-    cacheData[key] = createGeocache(
+
+    const cache = createGeocache(
       cell.i,
       cell.j,
       Array.from({ length: numCoins }, (_, idx) => ({
@@ -117,8 +144,17 @@ function ensureCacheExists(cell: Cell): Geocache {
         number: idx,
       })),
     );
+
+    // Save the cache state as a memento
+    cacheData[key] = cache.toMemento();
+
+    return cache;
   }
-  return cacheData[key];
+}
+
+function updateCacheMemento(cache: Geocache) {
+  const key = `${cache.i},${cache.j}`;
+  cacheData[key] = cache.toMemento();
 }
 
 // Rendering geocaches on the map
@@ -166,6 +202,7 @@ function setupPopupEventListeners(
         if (!addCoinToInventory(formatCoin(coin))) {
           cache.coins.push(coin);
         }
+        updateCacheMemento(cache); // Save state after mutation
         updateInventoryUI();
         renderPopupContent(popupDiv, cache, cell);
       }
@@ -177,6 +214,7 @@ function setupPopupEventListeners(
         const coinStr = inventory.pop()!;
         const [i, j, number] = coinStr.split(/[:#]/).map(Number);
         cache.coins.push({ i, j, number });
+        updateCacheMemento(cache); // Save state after mutation
         updateInventoryUI();
         renderPopupContent(popupDiv, cache, cell);
       }
